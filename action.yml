@@ -1,0 +1,52 @@
+name: ScreenshotMAX Capture
+description: Call ScreenshotMAX API with HMAC signature and save the result if successful.
+author: screenshotmax.com
+inputs:
+  access_key:
+    description: 'Your ScreenshotMAX API access key'
+    required: true
+  secret_key:
+    description: 'Your ScreenshotMAX API secret key'
+    required: true
+  querystring:
+    description: 'Your querystring (e.g. url=https://example.com&format=png)'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        echo "Generating signature and calling ScreenshotMAX API..."
+
+        # Extract parameters
+        ACCESS_KEY="${{ inputs.access_key }}"
+        SECRET_KEY="${{ inputs.secret_key }}"
+        QS="${{ inputs.querystring }}"
+        FORMAT=$(echo "$QS" | grep -oE 'format=([^&]+)' | cut -d= -f2)
+        FILE_NAME="output.${FORMAT:-png}"
+
+        # Create payload: raw string (access_key + querystring)
+        QS_STRING="access_key=${ACCESS_KEY}&${QS}"
+
+        # Generate HMAC-SHA256 signature
+        SIGNATURE=$(printf '%s' "$QS_STRING" | openssl dgst -sha256 -hmac "$SECRET_KEY" | sed 's/^.* //')
+
+        echo "Signature generated."
+
+        # Perform GET request with signed query
+        http_code=$(curl -s -w "%{http_code}" -o response.bin -G "https://api.screenshotmax.com/v1/screenshot" \
+          --data-urlencode "$QS_STRING" \
+          --data-urlencode "signature=$SIGNATURE")
+
+        echo "HTTP code: $http_code"
+
+        if [ "$http_code" -eq 200 ]; then
+          mv response.bin "$FILE_NAME"
+          echo "Screenshot saved as $FILE_NAME"
+        else
+          echo "API call failed with HTTP $http_code"
+          cat response.bin
+          exit 1
+        fi
+
+        echo "file_name=$FILE_NAME" >> "$GITHUB_OUTPUT"
